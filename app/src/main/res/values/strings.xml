@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">To Do</string>
+    <string name="complete_to_do">Complete To Do</string>
+    <string name="to_do_title">Title:</string>
+    <string name="to_do_date">Date:</string>
+    <string name="to_do_priority">Priority:</string>
+    <string name="date_picker_title">To Do Due Date</string>
+</resources>
