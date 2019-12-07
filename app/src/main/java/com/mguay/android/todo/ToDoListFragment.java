@@ -15,6 +15,9 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import android.util.Log;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Adapter;
@@ -22,19 +25,31 @@ import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.TextView;
 
+import com.mguay.android.todo.data.AppDatabase;
+import com.mguay.android.todo.data.ToDo;
+import com.mguay.android.todo.data.ToDoRepository;
+
 import java.text.SimpleDateFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class ToDoListFragment extends Fragment {
 
     private RecyclerView mToDoRecyclerView;
+    private ToDoViewModel toDoViewModel;
     private ToDoAdapter mAdapter;
-    private static final int REQUEST_TO_DO_CODE = 0;
 
     public static ToDoListFragment newInstance() {
         return new ToDoListFragment();
+    }
+
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setHasOptionsMenu(true);
     }
 
     @Override
@@ -45,40 +60,47 @@ public class ToDoListFragment extends Fragment {
         mToDoRecyclerView = view.findViewById(R.id.to_do_recycler_view);
         mToDoRecyclerView.setLayoutManager(new LinearLayoutManager(getActivity()));
 
+        toDoViewModel = ViewModelProviders.of(getActivity(), new ToDoViewModelFactory(
+                ToDoRepository.get(AppDatabase.get(getActivity()).toDoDao())
+        )).get(ToDoViewModel.class);
+
+        mAdapter = new ToDoAdapter();
+        mToDoRecyclerView.setAdapter(mAdapter);
+
+        toDoViewModel.getToDos().observe(this, new Observer<List<ToDo>>() {
+            @Override
+            public void onChanged(@Nullable final List<ToDo> toDos) {
+                if (toDos == null) return;
+                mAdapter.setToDos(toDos);
+            }
+        });
+
         return view;
     }
 
     @Override
-    public void onActivityCreated(@Nullable Bundle savedInstanceState) {
-        super.onActivityCreated(savedInstanceState);
-        updateUI(0);
+    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+        super.onCreateOptionsMenu(menu, inflater);
+        inflater.inflate(R.menu.fragment_to_do_list, menu);
     }
 
     @Override
-    public void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (resultCode != Activity.RESULT_OK) {
-            return;
-        }
-
-        if (requestCode == REQUEST_TO_DO_CODE) {
-            if (data == null) {
-                return;
+    public boolean onOptionsItemSelected(MenuItem item) {
+        switch (item.getItemId()) {
+            case R.id.new_to_do: {
+                ToDo toDo = new ToDo();
+                toDo.setTid(getRandom(Integer.MIN_VALUE, Integer.MAX_VALUE));
+                toDoViewModel.insertToDo(toDo);
+                Intent intent = ToDoActivity.newIntent(getActivity(), toDo.getTid());
+                startActivity(intent);
+                return true;
             }
-
-            int position = data.getIntExtra(ToDoActivity.EXTRA_POSITION, 0);
-            updateUI(position);
-        }
-    }
-
-    private void updateUI(int position) {
-        ToDoList toDoList = ToDoList.get(getActivity());
-        List<ToDo> toDos = toDoList.getToDos();
-
-        if (mAdapter == null) {
-            mAdapter = new ToDoAdapter(toDos);
-            mToDoRecyclerView.setAdapter(mAdapter);
-        } else {
-            mAdapter.notifyItemChanged(position);
+            case R.id.settings: {
+                Intent intent = SettingsActivity.newIntent(getActivity());
+                startActivity(intent);
+            }
+            default:
+                return super.onOptionsItemSelected(item);
         }
     }
 
@@ -105,6 +127,14 @@ public class ToDoListFragment extends Fragment {
                     @Override
                     public void onCheckedChanged(CompoundButton compoundButton, boolean b) {
                         mToDo.setComplete(b);
+                        mToDoRecyclerView.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                toDoViewModel.deleteToDo(mToDo);
+                                mAdapter.notifyItemRemoved(mPosition);
+                                notifyItemRangeChanged(mPosition, mAdapter.getItemCount());
+                            }
+                        });
                     }
                 });
             }
@@ -113,10 +143,14 @@ public class ToDoListFragment extends Fragment {
                 mToDo = toDo;
                 mPosition = position;
                 mTitleTextView.setText(mToDo.getTitle());
-                String formattedDate = new SimpleDateFormat("E, MMM d, y", Locale.ENGLISH)
-                        .format(toDo.getDueDate());
-                mDueDateTextView.setText(formattedDate);
-                mPriorityTextView.setText(toDo.getPriority().name());
+                if (mToDo.getDueDate() != null) {
+                    String formattedDate = new SimpleDateFormat("E, MMM d, y", Locale.ENGLISH).format(mToDo.getDueDate());
+                    mDueDateTextView.setText(formattedDate);
+                }
+                if (mToDo.getPriority() != null) {
+                    mPriorityTextView.setText(mToDo.getPriority());
+                }
+
                 mIsCompleteCheckBox.setChecked(toDo.isComplete());
             }
 
@@ -124,18 +158,13 @@ public class ToDoListFragment extends Fragment {
             public void onClick(View view) {
                 Intent intent = ToDoActivity.newIntent(
                         view.getContext(),
-                        mToDo.getToDoId(),
-                        mPosition
+                        mToDo.getTid()
                 );
-                startActivityForResult(intent, REQUEST_TO_DO_CODE);
+                startActivity(intent);
             }
         }
 
         private List<ToDo> mToDos;
-
-        public ToDoAdapter(List<ToDo> toDos) {
-            mToDos = toDos;
-        }
 
         @Override
         public ToDoHolder onCreateViewHolder(ViewGroup parent, int viewType) {
@@ -145,14 +174,33 @@ public class ToDoListFragment extends Fragment {
 
         @Override
         public void onBindViewHolder(ToDoHolder holder, int position) {
-            ToDo toDo = mToDos.get(position);
-            holder.bind(toDo, position);
+            if (mToDos != null) {
+                ToDo toDo = mToDos.get(position);
+                holder.bind(toDo, position);
+            }
         }
+
+        public void setToDos(List<ToDo> toDos){
+            mToDos = toDos;
+            notifyDataSetChanged();
+        }
+
 
         @Override
         public int getItemCount() {
-            return mToDos.size();
+            if (mToDos != null) {
+                return mToDos.size();
+            } else {
+                return 0;
+            }
         }
+    }
+
+    public static int getRandom(int min, int max) {
+        if (min > max) {
+            throw new IllegalArgumentException("Min " + min + " greater than max " + max);
+        }
+        return (int) ( (long) min + Math.random() * ((long)max - min + 1));
     }
 
 }

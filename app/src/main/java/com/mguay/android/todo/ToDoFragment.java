@@ -16,9 +16,17 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
+import androidx.lifecycle.Observer;
+import androidx.lifecycle.ViewModel;
+import androidx.lifecycle.ViewModelProviders;
+
+import com.mguay.android.todo.data.AppDatabase;
+import com.mguay.android.todo.data.ToDo;
+import com.mguay.android.todo.data.ToDoRepository;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -31,9 +39,10 @@ public class ToDoFragment extends Fragment {
     private ToDo mToDo;
     private EditText mTitleField;
     private Button mDateButton;
+    private ToDoViewModel toDoViewModel;
     private EditText mPriorityField;
 
-    public static ToDoFragment newInstance(UUID toDoId) {
+    public static ToDoFragment newInstance(int toDoId) {
         Bundle args = new Bundle();
         args.putSerializable(ARG_TO_DO_ID, toDoId);
 
@@ -48,15 +57,40 @@ public class ToDoFragment extends Fragment {
                              @Nullable Bundle savedInstanceState) {
         View view =  inflater.inflate(R.layout.to_do_fragment, container, false);
 
-        UUID toDoId = (UUID) getArguments().getSerializable(ARG_TO_DO_ID);
-        mToDo = ToDoList.get(getActivity()).getToDo(toDoId);
-
         mTitleField = view.findViewById(R.id.single_to_do_title);
         mDateButton = view.findViewById(R.id.to_do_due_date_button);
         mPriorityField = view.findViewById(R.id.single_to_do_priority);
 
-        mTitleField.setText(mToDo.getTitle());
-        mPriorityField.setText(mToDo.getPriority().name());
+        final int toDoId = getArguments().getInt(ARG_TO_DO_ID);
+        Log.i("toDoFragment", Integer.toString(toDoId));
+
+        toDoViewModel = ViewModelProviders.of(getActivity(), new ToDoViewModelFactory(
+                ToDoRepository.get(AppDatabase.get(getActivity()).toDoDao())
+        )).get(ToDoViewModel.class);
+
+        toDoViewModel.getToDos().observe(this, new Observer<List<ToDo>>() {
+            @Override
+            public void onChanged(List<ToDo> toDos) {
+                // If I had more time I would have used a hash map for efficiency reasons
+                for (int i = 0; i < toDos.size(); i++) {
+                    if (toDos.get(i).getTid() == toDoId) {
+                        mToDo = toDos.get(i);
+                    }
+                }
+
+                if (mToDo != null) {
+                    mTitleField.setText(mToDo.getTitle());
+                    mPriorityField.setText(mToDo.getPriority());
+                    updateDate();
+
+                } else {
+                    mToDo = new ToDo();
+                    mToDo.setTid(toDoId);
+                    mToDo.setPriority(ToDo.Priority.A);
+                    mToDo.setDueDate(new Date());
+                }
+            }
+        });
 
         mTitleField.addTextChangedListener(new TextWatcher() {
             @Override
@@ -75,7 +109,6 @@ public class ToDoFragment extends Fragment {
             }
         });
 
-        updateDate();
         mDateButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -95,13 +128,13 @@ public class ToDoFragment extends Fragment {
             @Override
             public void onTextChanged(CharSequence charSequence, int i, int i1, int i2) {
                 switch (charSequence.toString()) {
-                    case "B": mToDo.setPriority(Priority.B);
+                    case "B": mToDo.setPriority(ToDo.Priority.B);
                         break;
-                    case "C": mToDo.setPriority(Priority.C);
+                    case "C": mToDo.setPriority(ToDo.Priority.C);
                         break;
-                    case "D": mToDo.setPriority(Priority.D);
+                    case "D": mToDo.setPriority(ToDo.Priority.D);
                         break;
-                    default: mToDo.setPriority(Priority.A);
+                    default: mToDo.setPriority(ToDo.Priority.A);
                         break;
                 }
             }
@@ -113,6 +146,12 @@ public class ToDoFragment extends Fragment {
         });
 
         return view;
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        toDoViewModel.updateToDo(mToDo);
     }
 
     @Override
@@ -129,7 +168,15 @@ public class ToDoFragment extends Fragment {
     }
 
     private void updateDate() {
-        String formattedDate = new SimpleDateFormat("E, MMM d, y", Locale.ENGLISH).format(mToDo.getDueDate());
+        Date date;
+
+        if (mToDo.getDueDate() != null) {
+            date = mToDo.getDueDate();
+        } else {
+            date = new Date();
+            mToDo.setDueDate(date);
+        }
+        String formattedDate = new SimpleDateFormat("E, MMM d, y", Locale.ENGLISH).format(date);
         mDateButton.setText(formattedDate);
     }
 }
